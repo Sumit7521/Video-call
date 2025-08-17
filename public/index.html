@@ -29,6 +29,37 @@
     </div>
   </header>
 
+      <!-- Meeting Entry Modal/Section -->
+    <div id="meeting-entry" class="fixed inset-0 bg-slate-900 bg-opacity-90 flex justify-center items-center z-50">
+      <div class="bg-slate-800 border border-gray-700 rounded-xl shadow-xl p-8 w-full max-w-md">
+        <h2 class="text-2xl font-bold mb-2">Welcome!</h2>
+        <p class="text-slate-400 mb-6">Start or join a virtual classroom meeting.</p>
+        <div class="space-y-6">
+          <div class="flex flex-col gap-3 mb-4">
+            <button id="create-meeting" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md font-medium transition-colors flex items-center justify-center">
+              <svg class="h-5 w-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+              Create New Meeting (Host)
+            </button>
+          </div>
+          <div class="flex flex-col gap-3">
+            <input id="meeting-id-input" type="text" placeholder="Enter Meeting ID to Join" class="bg-slate-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button  id="join-meeting" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-md font-medium transition-colors flex items-center justify-center">
+              <svg class="h-5 w-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+              </svg>
+              Join Meeting
+            </button>
+          </div>
+        </div>
+        <div id="meeting-id-display" class="mt-6 text-center text-slate-300 text-lg font-semibold"></div>
+      </div>
+    </div>
+
   <!-- Main Content -->
   <main id="main-content" class="flex-1 flex gap-6 p-6 pb-32 flex-col lg:flex-row">
     <!-- Video Section -->
