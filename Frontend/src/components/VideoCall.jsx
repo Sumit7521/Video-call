@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 
+// Backend URL - hardcoded for immediate deployment
+const BACKEND_URL = 'https://video-call-4xrs.onrender.com';
+
 const VideoCall = () => {
   const [socket, setSocket] = useState(null);
   const [localStream, setLocalStream] = useState(null);
@@ -72,7 +75,25 @@ const VideoCall = () => {
 
   // Initialize socket connection
   useEffect(() => {
-    const newSocket = io('http://localhost:3000');
+    console.log('Connecting to backend:', BACKEND_URL);
+    const newSocket = io(BACKEND_URL, {
+      transports: ['websocket', 'polling'], // Fallback to polling if websocket fails
+      timeout: 20000,
+      forceNew: true
+    });
+
+    newSocket.on('connect', () => {
+      console.log('Successfully connected to backend server');
+    });
+
+    newSocket.on('connect_error', (error) => {
+      console.error('Connection error:', error);
+    });
+
+    newSocket.on('disconnect', (reason) => {
+      console.log('Disconnected from server:', reason);
+    });
+
     setSocket(newSocket);
 
     return () => newSocket.close();
@@ -168,7 +189,10 @@ const VideoCall = () => {
   const createPeerConnection = (userId) => {
     console.log('Creating peer connection for:', userId);
     const peerConnection = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ],
     });
 
     if (localStream) {
@@ -259,13 +283,20 @@ const VideoCall = () => {
       
       // Check if room exists before joining
       try {
-        const response = await fetch(`http://localhost:3000/api/check-room/${trimmedId}`);
+        console.log(`Checking room existence at: ${BACKEND_URL}/api/check-room/${trimmedId}`);
+        const response = await fetch(`${BACKEND_URL}/api/check-room/${trimmedId}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
         
         if (!response.ok) {
           throw new Error(`Server returned ${response.status}: ${response.statusText}`);
         }
         
         const data = await response.json();
+        console.log('Room check response:', data);
         
         if (!data.exists) {
           alert('Room ID does not exist. Please check the Meeting ID or create a new meeting.');
@@ -283,7 +314,7 @@ const VideoCall = () => {
         console.error('Error checking room existence:', error);
         
         if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-          alert('Cannot connect to the server. Please make sure the backend server is running on port 3000.');
+          alert(`Cannot connect to the server at ${BACKEND_URL}. Please make sure the backend server is running and accessible.`);
         } else {
           alert(`Error checking room existence: ${error.message}. Please try again.`);
         }
@@ -478,15 +509,15 @@ const VideoCall = () => {
             {!showMeetingEntry && (
               <div className="flex items-center gap-3 text-sm bg-white/5 backdrop-blur-sm px-4 py-2 rounded-full border border-white/10">
                 <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-<span className="text-slate-300">Meeting ID: <span className="font-mono text-green-400">{roomId}</span></span>
-<button
-  onClick={() => navigator.clipboard.writeText(roomId).then(() => {
-    alert('Meeting ID copied to clipboard!');
-  })}
-  className="ml-2 bg-blue-500 text-white px-2 py-1 rounded"
->
-  Copy
-</button>
+                <span className="text-slate-300">Meeting ID: <span className="font-mono text-green-400">{roomId}</span></span>
+                <button
+                  onClick={() => navigator.clipboard.writeText(roomId).then(() => {
+                    alert('Meeting ID copied to clipboard!');
+                  })}
+                  className="ml-2 bg-blue-500 text-white px-2 py-1 rounded"
+                >
+                  Copy
+                </button>
               </div>
             )}
           </div>
