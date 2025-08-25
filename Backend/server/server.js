@@ -6,16 +6,40 @@ const cors = require('cors');
 const app = express();
 const server = http.createServer(app);
 
-// Configure CORS to allow requests from frontend
+// Configure CORS to allow requests from frontend (more flexible for port forwarding)
 app.use(cors({
-  origin: "http://localhost:5173",
-  methods: ["GET", "POST"]
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Allow localhost and any subdomain
+    if (origin.match(/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$/)) {
+      return callback(null, true);
+    }
+    
+    // Allow any origin for development (you might want to restrict this in production)
+    callback(null, true);
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 }));
 
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173",
-    methods: ["GET", "POST"]
+    origin: function(origin, callback) {
+      // Allow requests with no origin
+      if (!origin) return callback(null, true);
+      
+      // Allow localhost and any subdomain
+      if (origin.match(/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$/)) {
+        return callback(null, true);
+      }
+      
+      // Allow any origin for development
+      callback(null, true);
+    },
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
@@ -140,6 +164,24 @@ app.get('/health', (req, res) => {
     activeRooms: activeRooms.size,
     totalConnections: io.engine.clientsCount 
   });
+});
+
+// Endpoint to check if a room exists
+app.get('/api/check-room/:roomId', (req, res) => {
+  const { roomId } = req.params;
+  const exists = activeRooms.has(roomId);
+  
+  // Detailed logging for debugging
+  console.log(`\n=== Room Check Request ===`);
+  console.log(`Request from: ${req.headers.origin || 'Unknown origin'}`);
+  console.log(`Room ID: ${roomId}`);
+  console.log(`Room exists: ${exists}`);
+  console.log(`Active rooms: ${Array.from(activeRooms.keys()).join(', ') || 'None'}`);
+  console.log(`Total active rooms: ${activeRooms.size}`);
+  console.log(`Total connections: ${io.engine.clientsCount}`);
+  console.log(`=== End Room Check ===\n`);
+  
+  res.json({ exists });
 });
 
 server.listen(3000, () => {

@@ -207,14 +207,15 @@ const VideoCall = () => {
     return peerConnection;
   };
 
-  const startMeeting = async () => {
-    if (!roomId.trim()) {
+  const startMeeting = async (meetingId = roomId) => {
+    const idToUse = meetingId || roomId;
+    if (!idToUse.trim()) {
       alert('Please enter a valid Meeting ID.');
-      return;
+      return false;
     }
 
     try {
-      console.log('Starting meeting with room ID:', roomId);
+      console.log('Starting meeting with room ID:', idToUse);
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       setLocalStream(stream);
       
@@ -225,30 +226,68 @@ const VideoCall = () => {
         }
       }, 100);
 
-      socket.emit('join-room', roomId);
+      socket.emit('join-room', idToUse);
       setShowMeetingEntry(false);
-      console.log('Joined room:', roomId);
+      console.log('Joined room:', idToUse);
+      return true;
     } catch (error) {
       console.error('Error accessing media devices:', error);
       alert('Error accessing camera/microphone. Please ensure permissions are granted.');
+      return false;
     }
   };
 
-  const createMeeting = () => {
+  const createMeeting = async () => {
     const newRoomId = 'meet-' + Math.random().toString(36).substring(2, 9);
     setRoomId(newRoomId);
     setMeetingIdInput(newRoomId);
     setIsHost(true);
     console.log('Created meeting with ID:', newRoomId);
+    
+    // Automatically start the meeting after creating it
+    const result = await startMeeting(newRoomId);
+    if (!result) {
+      alert('Failed to start the meeting. Please try again.');
+    }
   };
 
   const joinMeeting = async () => {
     const trimmedId = meetingIdInput.trim();
     if (trimmedId) {
-      setRoomId(trimmedId);
       setIsHost(false);
       console.log('Attempting to join meeting:', trimmedId);
-      await startMeeting();
+      
+      // Check if room exists before joining
+      try {
+        const response = await fetch(`http://localhost:3000/api/check-room/${trimmedId}`);
+        
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!data.exists) {
+          alert('Room ID does not exist. Please check the Meeting ID or create a new meeting.');
+          return;
+        }
+        
+        const result = await startMeeting(trimmedId);
+        if (result) {
+          console.log('Successfully joined the meeting');
+          setRoomId(trimmedId); // Update roomId state after successful join
+        } else {
+          alert('Failed to join the meeting. Please check the Meeting ID.');
+        }
+      } catch (error) {
+        console.error('Error checking room existence:', error);
+        
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+          alert('Cannot connect to the server. Please make sure the backend server is running on port 3000.');
+        } else {
+          alert(`Error checking room existence: ${error.message}. Please try again.`);
+        }
+      }
     } else {
       alert('Please enter a valid Meeting ID.');
     }
@@ -439,7 +478,15 @@ const VideoCall = () => {
             {!showMeetingEntry && (
               <div className="flex items-center gap-3 text-sm bg-white/5 backdrop-blur-sm px-4 py-2 rounded-full border border-white/10">
                 <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                <span className="text-slate-300">Meeting ID: <span className="font-mono text-green-400">{roomId}</span></span>
+<span className="text-slate-300">Meeting ID: <span className="font-mono text-green-400">{roomId}</span></span>
+<button
+  onClick={() => navigator.clipboard.writeText(roomId).then(() => {
+    alert('Meeting ID copied to clipboard!');
+  })}
+  className="ml-2 bg-blue-500 text-white px-2 py-1 rounded"
+>
+  Copy
+</button>
               </div>
             )}
           </div>
@@ -488,12 +535,10 @@ const VideoCall = () => {
                 <div className="text-center bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10">
                   <p className="text-slate-400 text-sm mb-2">Meeting ID:</p>
                   <p className="text-slate-100 font-mono text-lg bg-gradient-to-r from-green-400 to-blue-400 bg-clip-text text-transparent font-bold mb-4">{roomId}</p>
-                  <button
-                    onClick={startMeeting}
-                    className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white py-3 px-4 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg"
-                  >
-                    Start Meeting
-                  </button>
+                  <div className="flex items-center justify-center gap-2 text-green-400">
+                    <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                    <span className="text-sm">Meeting started automatically</span>
+                  </div>
                 </div>
               )}
             </div>
