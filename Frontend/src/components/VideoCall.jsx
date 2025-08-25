@@ -1,8 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 
-// Backend URL - hardcoded for immediate deployment
-const BACKEND_URL = 'https://video-call-4xrs.onrender.com';
+// Backend URL - handle environment variables safely
+const BACKEND_URL = (() => {
+  // For Vite (recommended)
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    return import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+  }
+  
+  // For Create React App
+  if (typeof window !== 'undefined' && window.env) {
+    return window.env.REACT_APP_BACKEND_URL || 'http://localhost:3000';
+  }
+  
+  // Fallback
+  return 'http://localhost:3000';
+})();
 
 const VideoCall = () => {
   const [socket, setSocket] = useState(null);
@@ -18,8 +31,9 @@ const VideoCall = () => {
   const [chatMessage, setChatMessage] = useState('');
   const [chatMessages, setChatMessages] = useState([]);
   const [meetingIdInput, setMeetingIdInput] = useState('');
-  const [pinnedVideo, setPinnedVideo] = useState(null); // 'local' or userId
+  const [pinnedVideo, setPinnedVideo] = useState(null);
   const [hoveredVideo, setHoveredVideo] = useState(null);
+  const [connectionStatus, setConnectionStatus] = useState('connecting');
   
   const videoGridRef = useRef(null);
   const localVideoRef = useRef(null);
@@ -77,26 +91,32 @@ const VideoCall = () => {
   useEffect(() => {
     console.log('Connecting to backend:', BACKEND_URL);
     const newSocket = io(BACKEND_URL, {
-      transports: ['websocket', 'polling'], // Fallback to polling if websocket fails
+      transports: ['websocket', 'polling'],
       timeout: 20000,
-      forceNew: true
+      forceNew: true,
+      autoConnect: true
     });
 
     newSocket.on('connect', () => {
       console.log('Successfully connected to backend server');
+      setConnectionStatus('connected');
     });
 
     newSocket.on('connect_error', (error) => {
       console.error('Connection error:', error);
+      setConnectionStatus('error');
     });
 
     newSocket.on('disconnect', (reason) => {
       console.log('Disconnected from server:', reason);
+      setConnectionStatus('disconnected');
     });
 
     setSocket(newSocket);
 
-    return () => newSocket.close();
+    return () => {
+      newSocket.close();
+    };
   }, []);
 
   // Socket event listeners
@@ -157,7 +177,6 @@ const VideoCall = () => {
         delete newPeers[userId];
         return newPeers;
       });
-      // Unpin if the disconnected user was pinned
       if (pinnedVideo === userId) {
         setPinnedVideo(null);
       }
@@ -213,13 +232,12 @@ const VideoCall = () => {
 
     peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
-        console.log('Sending ICE candidate to user:', userId);
         socket.emit('signal', { target: userId, signal: event.candidate });
       }
     };
 
     peerConnection.onconnectionstatechange = () => {
-      console.log('Connection state changed:', peerConnection.connectionState);
+      console.log(`Connection state for ${userId}:`, peerConnection.connectionState);
     };
 
     peersRef.current[userId] = peerConnection;
@@ -240,7 +258,10 @@ const VideoCall = () => {
 
     try {
       console.log('Starting meeting with room ID:', idToUse);
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: 1280, height: 720 }, 
+        audio: true 
+      });
       setLocalStream(stream);
       
       setTimeout(() => {
@@ -268,7 +289,6 @@ const VideoCall = () => {
     setIsHost(true);
     console.log('Created meeting with ID:', newRoomId);
     
-    // Automatically start the meeting after creating it
     const result = await startMeeting(newRoomId);
     if (!result) {
       alert('Failed to start the meeting. Please try again.');
@@ -277,50 +297,49 @@ const VideoCall = () => {
 
   const joinMeeting = async () => {
     const trimmedId = meetingIdInput.trim();
-    if (trimmedId) {
-      setIsHost(false);
-      console.log('Attempting to join meeting:', trimmedId);
-      
-      // Check if room exists before joining
-      try {
-        console.log(`Checking room existence at: ${BACKEND_URL}/api/check-room/${trimmedId}`);
-        const response = await fetch(`${BACKEND_URL}/api/check-room/${trimmedId}`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Server returned ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        console.log('Room check response:', data);
-        
-        if (!data.exists) {
-          alert('Room ID does not exist. Please check the Meeting ID or create a new meeting.');
-          return;
-        }
-        
-        const result = await startMeeting(trimmedId);
-        if (result) {
-          console.log('Successfully joined the meeting');
-          setRoomId(trimmedId); // Update roomId state after successful join
-        } else {
-          alert('Failed to join the meeting. Please check the Meeting ID.');
-        }
-      } catch (error) {
-        console.error('Error checking room existence:', error);
-        
-        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-          alert(`Cannot connect to the server at ${BACKEND_URL}. Please make sure the backend server is running and accessible.`);
-        } else {
-          alert(`Error checking room existence: ${error.message}. Please try again.`);
-        }
-      }
-    } else {
+    if (!trimmedId) {
       alert('Please enter a valid Meeting ID.');
+      return;
+    }
+
+    try {
+      console.log(`Checking room existence at: ${BACKEND_URL}/api/meet/check-room/${trimmedId}`);
+      const response = await fetch(`${BACKEND_URL}/api/meet/check-room/${trimmedId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      console.log('Room check response:', data);
+      
+      if (!data.exists) {
+        alert('Room ID does not exist. Please check the Meeting ID or create a new meeting.');
+        return;
+      }
+      
+      setIsHost(false);
+      const result = await startMeeting(trimmedId);
+      if (result) {
+        console.log('Successfully joined the meeting');
+        setRoomId(trimmedId);
+      } else {
+        alert('Failed to join the meeting. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error checking room existence:', error);
+      
+      if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+        alert(`Cannot connect to the server at ${BACKEND_URL}. Please check if the backend server is running.`);
+      } else {
+        alert(`Error: ${error.message}. Please try again.`);
+      }
     }
   };
 
@@ -378,11 +397,14 @@ const VideoCall = () => {
       };
     } catch (error) {
       console.error('Error sharing screen:', error);
+      alert('Screen sharing failed. Please try again.');
     }
   };
 
   const leaveMeeting = () => {
-    socket.emit('leave-room');
+    if (socket) {
+      socket.emit('leave-room');
+    }
     
     if (localStream) {
       localStream.getTracks().forEach(track => track.stop());
@@ -398,11 +420,13 @@ const VideoCall = () => {
     setChatMessages([]);
     setPinnedVideo(null);
     setShowMeetingEntry(true);
+    setMeetingIdInput('');
+    setRoomId('');
     console.log('Left the meeting and cleared resources.');
   };
 
   const sendMessage = () => {
-    if (chatMessage.trim() !== '') {
+    if (chatMessage.trim() !== '' && socket) {
       setChatMessages(prev => [...prev, { username: 'You', message: chatMessage, isOwn: true }]);
       socket.emit('chat', { message: chatMessage, username });
       setChatMessage('');
@@ -432,7 +456,24 @@ const VideoCall = () => {
     setPinnedVideo(videoId === pinnedVideo ? null : videoId);
   };
 
-  // Get all participants (local + remote)
+  const copyMeetingId = async () => {
+    try {
+      await navigator.clipboard.writeText(roomId);
+      alert('Meeting ID copied to clipboard!');
+    } catch (error) {
+      console.error('Failed to copy:', error);
+      // Fallback for browsers that don't support clipboard API
+      const textArea = document.createElement('textarea');
+      textArea.value = roomId;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      alert('Meeting ID copied to clipboard!');
+    }
+  };
+
+  // Get all participants
   const getAllParticipants = () => {
     const participants = [
       { id: 'local', name: `You (${username})`, stream: localStream, isLocal: true }
@@ -456,6 +497,17 @@ const VideoCall = () => {
   const pinnedParticipant = participants.find(p => p.id === pinnedVideo);
   const unpinnedParticipants = participants.filter(p => p.id !== pinnedVideo);
 
+  // Connection status indicator
+  const getStatusColor = () => {
+    switch(connectionStatus) {
+      case 'connected': return 'bg-green-500';
+      case 'connecting': return 'bg-yellow-500';
+      case 'error': return 'bg-red-500';
+      case 'disconnected': return 'bg-gray-500';
+      default: return 'bg-gray-500';
+    }
+  };
+
   // Username Modal
   if (showUsernameModal) {
     return (
@@ -467,6 +519,12 @@ const VideoCall = () => {
             </div>
             <h2 className="text-2xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Welcome to Virtual Classroom</h2>
             <p className="text-slate-400 mb-6">Please enter your name to continue.</p>
+            
+            {/* Connection Status */}
+            <div className="flex items-center justify-center gap-2 text-sm text-slate-400 mb-4">
+              <div className={`w-2 h-2 rounded-full ${getStatusColor()}`}></div>
+              <span>Server: {connectionStatus}</span>
+            </div>
           </div>
           <div className="space-y-4">
             <input
@@ -479,9 +537,10 @@ const VideoCall = () => {
             />
             <button
               onClick={submitUsername}
-              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white py-3 px-4 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg"
+              disabled={connectionStatus !== 'connected'}
+              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white py-3 px-4 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg"
             >
-              Continue
+              {connectionStatus === 'connected' ? 'Continue' : 'Connecting...'}
             </button>
           </div>
         </div>
@@ -508,13 +567,11 @@ const VideoCall = () => {
             </div>
             {!showMeetingEntry && (
               <div className="flex items-center gap-3 text-sm bg-white/5 backdrop-blur-sm px-4 py-2 rounded-full border border-white/10">
-                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                <div className={`w-2 h-2 rounded-full animate-pulse ${getStatusColor()}`}></div>
                 <span className="text-slate-300">Meeting ID: <span className="font-mono text-green-400">{roomId}</span></span>
                 <button
-                  onClick={() => navigator.clipboard.writeText(roomId).then(() => {
-                    alert('Meeting ID copied to clipboard!');
-                  })}
-                  className="ml-2 bg-blue-500 text-white px-2 py-1 rounded"
+                  onClick={copyMeetingId}
+                  className="ml-2 bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-lg text-xs transition-all"
                 >
                   Copy
                 </button>
@@ -531,12 +588,19 @@ const VideoCall = () => {
             <div className="text-center mb-6">
               <h2 className="text-2xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Welcome, {username}!</h2>
               <p className="text-slate-400 mb-6">Start or join a virtual classroom meeting.</p>
+              
+              {/* Connection Status */}
+              <div className="flex items-center justify-center gap-2 text-sm text-slate-400 mb-4">
+                <div className={`w-2 h-2 rounded-full ${getStatusColor()}`}></div>
+                <span>Server: {connectionStatus}</span>
+              </div>
             </div>
             <div className="space-y-6">
               <div className="flex flex-col gap-3 mb-4">
                 <button
                   onClick={createMeeting}
-                  className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white py-3 px-4 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 flex items-center justify-center shadow-lg"
+                  disabled={connectionStatus !== 'connected'}
+                  className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white py-3 px-4 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 flex items-center justify-center shadow-lg"
                 >
                   <svg className="h-5 w-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
@@ -553,10 +617,12 @@ const VideoCall = () => {
                   onChange={(e) => setMeetingIdInput(e.target.value)}
                   placeholder="Enter Meeting ID to Join"
                   className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
+                  onKeyPress={(e) => e.key === 'Enter' && joinMeeting()}
                 />
                 <button
                   onClick={joinMeeting}
-                  className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white py-3 px-4 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 flex items-center justify-center shadow-lg"
+                  disabled={connectionStatus !== 'connected'}
+                  className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white py-3 px-4 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 flex items-center justify-center shadow-lg"
                 >
                   <CameraOnIcon />
                   <span className="ml-2">Join Meeting</span>
@@ -568,7 +634,7 @@ const VideoCall = () => {
                   <p className="text-slate-100 font-mono text-lg bg-gradient-to-r from-green-400 to-blue-400 bg-clip-text text-transparent font-bold mb-4">{roomId}</p>
                   <div className="flex items-center justify-center gap-2 text-green-400">
                     <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                    <span className="text-sm">Meeting started automatically</span>
+                    <span className="text-sm">Meeting ready</span>
                   </div>
                 </div>
               )}
@@ -612,7 +678,6 @@ const VideoCall = () => {
                       />
                     )}
                     
-                    {/* Video Controls Overlay */}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent">
                       <div className="absolute bottom-4 left-4 flex items-center gap-2">
                         <div className="bg-black/70 backdrop-blur-sm text-white text-sm px-3 py-1 rounded-full border border-white/20">
@@ -621,7 +686,6 @@ const VideoCall = () => {
                         <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
                       </div>
                       
-                      {/* Pin/Unpin Button */}
                       {hoveredVideo === pinnedParticipant.id && (
                         <button
                           onClick={() => handlePinVideo(pinnedParticipant.id)}
@@ -672,13 +736,11 @@ const VideoCall = () => {
                       />
                     )}
                     
-                    {/* Video Controls Overlay */}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent">
                       <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-sm text-white text-xs px-2 py-1 rounded-full border border-white/20">
                         {participant.name}
                       </div>
                       
-                      {/* Pin Button */}
                       {hoveredVideo === participant.id && (
                         <button
                           onClick={() => handlePinVideo(participant.id)}
@@ -702,16 +764,25 @@ const VideoCall = () => {
                 </div>
 
                 <div ref={chatAreaRef} className="flex-1 overflow-y-auto p-4 space-y-3" style={{maxHeight: '250px'}}>
-                  {chatMessages.map((msg, index) => (
-                    <div key={index} className={`text-sm p-3 rounded-xl backdrop-blur-sm border ${
-                      msg.isOwn 
-                        ? 'bg-blue-600/20 border-blue-400/30 text-blue-100 ml-4' 
-                        : 'bg-slate-700/30 border-white/10 text-slate-200 mr-4'
-                    }`}>
-                      <div className="font-semibold text-xs opacity-70 mb-1">{msg.username}</div>
-                      <div>{msg.message}</div>
+                  {chatMessages.length === 0 ? (
+                    <div className="text-center text-slate-400 text-sm py-8">
+                      <svg className="h-8 w-8 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                      </svg>
+                      No messages yet. Start the conversation!
                     </div>
-                  ))}
+                  ) : (
+                    chatMessages.map((msg, index) => (
+                      <div key={index} className={`text-sm p-3 rounded-xl backdrop-blur-sm border ${
+                        msg.isOwn 
+                          ? 'bg-blue-600/20 border-blue-400/30 text-blue-100 ml-4' 
+                          : 'bg-slate-700/30 border-white/10 text-slate-200 mr-4'
+                      }`}>
+                        <div className="font-semibold text-xs opacity-70 mb-1">{msg.username}</div>
+                        <div>{msg.message}</div>
+                      </div>
+                    ))
+                  )}
                 </div>
 
                 <div className="p-4 border-t border-white/10">
@@ -726,7 +797,8 @@ const VideoCall = () => {
                     />
                     <button
                       onClick={sendMessage}
-                      className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg"
+                      disabled={!chatMessage.trim()}
+                      className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg"
                     >
                       Send
                     </button>
