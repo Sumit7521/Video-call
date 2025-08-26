@@ -1,3 +1,4 @@
+// Scene.jsx
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import { useControls } from 'leva';
@@ -25,7 +26,15 @@ const CameraController = () => {
   return null;
 };
 
-const Scene = () => {
+const Scene = ({ 
+  participants = [], 
+  chatMessages = [], 
+  onSendMessage, 
+  onLeaveMeeting, 
+  localStream, 
+  username, 
+  roomId 
+}) => {
   const controlsRef = useRef();
 
   return (
@@ -36,8 +45,15 @@ const Scene = () => {
       <CameraController />
       <Classroom />
       <Blackboard />
-      <RightBoard />
-      <LeftBoard />
+      <RightBoard 
+        chatMessages={chatMessages}
+        onSendMessage={onSendMessage}
+        username={username}
+      />
+      <LeftBoard 
+        participants={participants}
+        localStream={localStream}
+      />
 
       {/* OrbitControls for pan & zoom only */}
       <OrbitControls
